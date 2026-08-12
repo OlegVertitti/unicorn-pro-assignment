@@ -20,7 +20,10 @@ export async function streamAnalyze(
     });
   } catch {
     if (signal?.aborted) return;
-    onEvent({ stage: "error", error: { code: "network_error", message: "Couldn't reach the server." } });
+    onEvent({
+      stage: "error",
+      error: { code: "network_error", message: "Couldn't reach the server." },
+    });
     return;
   }
 
@@ -28,7 +31,10 @@ export async function streamAnalyze(
     const body: { error?: ApiErrorBody } | null = await response.json().catch(() => null);
     onEvent({
       stage: "error",
-      error: body?.error ?? { code: "network_error", message: `Request failed (${response.status}).` },
+      error: body?.error ?? {
+        code: "network_error",
+        message: `Request failed (${response.status}).`,
+      },
     });
     return;
   }
@@ -56,6 +62,9 @@ export async function streamAnalyze(
     }
   } catch {
     if (signal?.aborted) return;
-    onEvent({ stage: "error", error: { code: "network_error", message: "Connection to the server was interrupted." } });
+    onEvent({
+      stage: "error",
+      error: { code: "network_error", message: "Connection to the server was interrupted." },
+    });
   }
 }

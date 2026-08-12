@@ -38,7 +38,10 @@ export default function App() {
     if (!isValidDriveUrl(job.url)) {
       updateJob(job.id, {
         status: "error",
-        error: { code: "invalid_url", message: "This doesn't look like a public Google Drive link." },
+        error: {
+          code: "invalid_url",
+          message: "This doesn't look like a public Google Drive link.",
+        },
       });
       return;
     }
@@ -93,14 +96,16 @@ export default function App() {
       <header className="header">
         <h1>Ad Creative Analyzer</h1>
         <p className="subtitle">
-          Paste one or more public Google Drive links (one per line) to get a structured analysis
-          of the person in frame and a transcript of any speech.
+          Paste one or more public Google Drive links (one per line) to get a structured analysis of
+          the person in frame and a transcript of any speech.
         </p>
       </header>
 
       <form className="form" onSubmit={handleAnalyze}>
         <textarea
-          placeholder={"https://drive.google.com/file/d/.../view\nhttps://drive.google.com/file/d/.../view"}
+          placeholder={
+            "https://drive.google.com/file/d/.../view\nhttps://drive.google.com/file/d/.../view"
+          }
           value={input}
           onChange={(e) => setInput(e.target.value)}
           disabled={isRunning}

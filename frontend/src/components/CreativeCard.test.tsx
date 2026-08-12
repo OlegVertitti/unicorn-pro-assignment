@@ -56,7 +56,13 @@ describe("CreativeCard", () => {
       <CreativeCard
         job={job({
           status: "done",
-          result: { mediaType: "image", personDetected: false, person: null, hasSpeech: false, transcript: null },
+          result: {
+            mediaType: "image",
+            personDetected: false,
+            person: null,
+            hasSpeech: false,
+            transcript: null,
+          },
         })}
       />,
     );
@@ -110,7 +116,10 @@ describe("CreativeCard", () => {
   it("shows the error message when analysis failed", () => {
     render(
       <CreativeCard
-        job={job({ status: "error", error: { code: "drive_access_error", message: "cannot access file" } })}
+        job={job({
+          status: "error",
+          error: { code: "drive_access_error", message: "cannot access file" },
+        })}
       />,
     );
     expect(screen.getByText(/couldn't analyze this creative/i)).toBeInTheDocument();

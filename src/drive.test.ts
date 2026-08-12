@@ -16,7 +16,9 @@ describe("extractDriveFileId", () => {
   });
 
   it("rejects a non-Drive hostname", () => {
-    expect(() => extractDriveFileId("https://example.com/file/d/1abcXYZ/view")).toThrow(InvalidUrlError);
+    expect(() => extractDriveFileId("https://example.com/file/d/1abcXYZ/view")).toThrow(
+      InvalidUrlError,
+    );
   });
 
   it("rejects a malformed URL", () => {
@@ -24,7 +26,9 @@ describe("extractDriveFileId", () => {
   });
 
   it("rejects a Drive URL with no recognizable file id", () => {
-    expect(() => extractDriveFileId("https://drive.google.com/drive/my-drive")).toThrow(InvalidUrlError);
+    expect(() => extractDriveFileId("https://drive.google.com/drive/my-drive")).toThrow(
+      InvalidUrlError,
+    );
   });
 });
 
@@ -56,7 +60,7 @@ describe("downloadDriveFile", () => {
     const fetchMock = vi.fn(async () => {
       call++;
       if (call === 1) {
-        return new Response('<html>...confirm=abc123...</html>', {
+        return new Response("<html>...confirm=abc123...</html>", {
           status: 200,
           headers: { "content-type": "text/html; charset=utf-8" },
         });

@@ -50,7 +50,9 @@ describe("streamAnalyze", () => {
     const events: AnalyzeEvent[] = [];
     await streamAnalyze("https://drive.google.com/file/d/abc/view", (e) => events.push(e));
 
-    expect(events).toEqual([{ stage: "error", error: { code: "invalid_url", message: "bad url" } }]);
+    expect(events).toEqual([
+      { stage: "error", error: { code: "invalid_url", message: "bad url" } },
+    ]);
   });
 
   it("emits an error event when fetch itself rejects", async () => {

@@ -69,7 +69,9 @@ describe("analyzeCreative", () => {
       if (url.includes("mock.example.com/put")) {
         calls.push("upload-bytes");
         return new Response(
-          JSON.stringify({ file: { uri: "https://generativelanguage.googleapis.com/v1beta/files/abc" } }),
+          JSON.stringify({
+            file: { uri: "https://generativelanguage.googleapis.com/v1beta/files/abc" },
+          }),
           { status: 200 },
         );
       }
@@ -103,7 +105,9 @@ describe("analyzeCreative", () => {
       "fetch",
       vi.fn(
         async () =>
-          new Response(JSON.stringify({ promptFeedback: { blockReason: "SAFETY" } }), { status: 200 }),
+          new Response(JSON.stringify({ promptFeedback: { blockReason: "SAFETY" } }), {
+            status: 200,
+          }),
       ),
     );
 
@@ -112,13 +116,16 @@ describe("analyzeCreative", () => {
   });
 
   it("throws GeminiError when the response doesn't match the expected schema", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => generateContentResponse({ nonsense: true })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => generateContentResponse({ nonsense: true })),
+    );
 
     const file: DownloadedFile = { bytes: new Uint8Array([1]).buffer, mimeType: "image/png" };
     await expect(analyzeCreative(file, API_KEY)).rejects.toThrow(GeminiError);
   });
 
-  it("retries once on a 429 and succeeds on the second attempt", async () => {
+  it("retries after a 429 and succeeds on the next attempt", async () => {
     let call = 0;
     const fetchMock = vi.fn(async () => {
       call++;

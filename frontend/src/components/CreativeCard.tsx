@@ -20,7 +20,8 @@ const PARAM_LABELS: Record<keyof NonNullable<AnalysisResult["person"]>, string> 
 
 export function CreativeCard({ job }: { job: Job }) {
   const fileId = extractDriveFileId(job.url);
-  const isProgressStage = job.status !== "queued" && job.status !== "done" && job.status !== "error";
+  const isProgressStage =
+    job.status !== "queued" && job.status !== "done" && job.status !== "error";
 
   return (
     <div className="creative-card">
@@ -60,7 +61,9 @@ export function CreativeCard({ job }: { job: Job }) {
 
         {job.status === "done" && job.result && (
           <div className="result">
-            <div className="result-badge">{job.result.mediaType === "video" ? "Video" : "Image"}</div>
+            <div className="result-badge">
+              {job.result.mediaType === "video" ? "Video" : "Image"}
+            </div>
 
             <section className="card">
               <h2>Person in frame</h2>

@@ -46,9 +46,7 @@ export class GeminiError extends AppError {
 }
 
 export class GeminiSafetyBlockError extends AppError {
-  constructor(
-    message = "Gemini refused to analyze this creative (safety filter triggered).",
-  ) {
+  constructor(message = "Gemini refused to analyze this creative (safety filter triggered).") {
     super("gemini_safety_block", message, 422);
   }
 }

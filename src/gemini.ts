@@ -14,6 +14,7 @@ import {
 } from "./types";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
+const FILES_UPLOAD_URL = "https://generativelanguage.googleapis.com/upload/v1beta/files";
 const MODEL = "gemini-flash-latest";
 const FILE_POLL_INTERVAL_MS = 1500;
 const FILE_POLL_MAX_ATTEMPTS = 30; // ~45s ceiling for Gemini to finish processing the upload
@@ -58,12 +59,8 @@ async function fetchWithRetry(
  * and returns the file's URI once accepted. Used for video, which is too large/costly
  * to ship inline on every request and benefits from the Files API's own encoding.
  */
-async function uploadFile(
-  bytes: ArrayBuffer,
-  mimeType: string,
-  apiKey: string,
-): Promise<string> {
-  const startResponse = await fetch(`https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`, {
+async function uploadFile(bytes: ArrayBuffer, mimeType: string, apiKey: string): Promise<string> {
+  const startResponse = await fetch(`${FILES_UPLOAD_URL}?key=${apiKey}`, {
     method: "POST",
     headers: {
       "X-Goog-Upload-Protocol": "resumable",
@@ -75,7 +72,9 @@ async function uploadFile(
     body: JSON.stringify({ file: { displayName: "creative" } }),
   });
   if (!startResponse.ok) {
-    throw new GeminiError(`Failed to initialize upload to Gemini Files API (${startResponse.status}).`);
+    throw new GeminiError(
+      `Failed to initialize upload to Gemini Files API (${startResponse.status}).`,
+    );
   }
   const uploadUrl = startResponse.headers.get("x-goog-upload-url");
   if (!uploadUrl) {
@@ -106,7 +105,9 @@ async function waitUntilActive(fileUri: string, apiKey: string): Promise<void> {
   for (let attempt = 0; attempt < FILE_POLL_MAX_ATTEMPTS; attempt++) {
     const response = await fetch(`${fileUri}?key=${apiKey}`);
     if (!response.ok) {
-      throw new GeminiError(`Failed to check file processing status on Gemini (${response.status}).`);
+      throw new GeminiError(
+        `Failed to check file processing status on Gemini (${response.status}).`,
+      );
     }
     const json = (await response.json()) as { state?: string };
     if (json.state === "ACTIVE") return;
@@ -124,7 +125,10 @@ interface GeminiPart {
   file_data?: { mime_type: string; file_uri: string };
 }
 
-async function generateContent(mediaPart: GeminiPart, apiKey: string): Promise<Record<string, unknown>> {
+async function generateContent(
+  mediaPart: GeminiPart,
+  apiKey: string,
+): Promise<Record<string, unknown>> {
   const body = {
     contents: [
       {
@@ -149,7 +153,10 @@ async function generateContent(mediaPart: GeminiPart, apiKey: string): Promise<R
 
   if (!response.ok) {
     if (response.status === 429) {
-      throw new GeminiError("Gemini API is temporarily overloaded (rate limit). Please try again in a minute.", 429);
+      throw new GeminiError(
+        "Gemini API is temporarily overloaded (rate limit). Please try again in a minute.",
+        429,
+      );
     }
     const errText = await response.text().catch(() => "");
     throw new GeminiError(`Gemini API error (${response.status}): ${errText.slice(0, 300)}`);
@@ -213,7 +220,13 @@ export async function analyzeCreative(
   const result = parsed.data;
   // Images never carry speech — enforce this even if the model returns otherwise.
   if (mediaType === "image") {
-    return { mediaType, personDetected: result.personDetected, person: result.person, hasSpeech: false, transcript: null };
+    return {
+      mediaType,
+      personDetected: result.personDetected,
+      person: result.person,
+      hasSpeech: false,
+      transcript: null,
+    };
   }
   return { mediaType, ...result };
 }

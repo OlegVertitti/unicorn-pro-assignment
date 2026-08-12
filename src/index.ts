@@ -18,7 +18,10 @@ app.post("/api/analyze", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = analyzeRequestSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_request", message: "The url field is required." } }, 400);
+    return c.json(
+      { error: { code: "invalid_request", message: "The url field is required." } },
+      400,
+    );
   }
   const { url } = parsed.data;
 
@@ -36,7 +39,9 @@ app.post("/api/analyze", async (c) => {
       await send({ stage: "done", result });
     } catch (err) {
       const appError =
-        err instanceof AppError ? err : new AppError("internal_error", "Internal server error.", 500);
+        err instanceof AppError
+          ? err
+          : new AppError("internal_error", "Internal server error.", 500);
       if (!(err instanceof AppError)) {
         console.error("Unhandled error:", err);
       }
