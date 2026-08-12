@@ -1,9 +1,10 @@
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { z } from "zod";
 import { downloadDriveFile } from "./drive";
 import { AppError, FileTooLargeError } from "./errors";
 import { analyzeCreative } from "./gemini";
-import type { Env } from "./types";
+import type { AnalyzeSseEvent, Env } from "./types";
 
 const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100MB - generous for short ad creatives, guards against abuse
 
@@ -19,25 +20,29 @@ app.post("/api/analyze", async (c) => {
   if (!parsed.success) {
     return c.json({ error: { code: "invalid_request", message: "The url field is required." } }, 400);
   }
+  const { url } = parsed.data;
 
-  const file = await downloadDriveFile(parsed.data.url);
-  if (file.bytes.byteLength > MAX_FILE_BYTES) {
-    throw new FileTooLargeError();
-  }
+  return streamSSE(c, async (stream) => {
+    const send = (event: AnalyzeSseEvent) => stream.writeSSE({ data: JSON.stringify(event) });
 
-  const result = await analyzeCreative(file, c.env.GEMINI_API_KEY);
-  return c.json(result);
-});
+    try {
+      await send({ stage: "downloading" });
+      const file = await downloadDriveFile(url);
+      if (file.bytes.byteLength > MAX_FILE_BYTES) {
+        throw new FileTooLargeError();
+      }
 
-app.onError((err, c) => {
-  if (err instanceof AppError) {
-    return c.json({ error: { code: err.code, message: err.message } }, err.httpStatus as never);
-  }
-  console.error("Unhandled error:", err);
-  return c.json(
-    { error: { code: "internal_error", message: "Internal server error." } },
-    500,
-  );
+      const result = await analyzeCreative(file, c.env.GEMINI_API_KEY, (stage) => send({ stage }));
+      await send({ stage: "done", result });
+    } catch (err) {
+      const appError =
+        err instanceof AppError ? err : new AppError("internal_error", "Internal server error.", 500);
+      if (!(err instanceof AppError)) {
+        console.error("Unhandled error:", err);
+      }
+      await send({ stage: "error", error: { code: appError.code, message: appError.message } });
+    }
+  });
 });
 
 app.notFound((c) => c.json({ error: { code: "not_found", message: "Not found" } }, 404));

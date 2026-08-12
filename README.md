@@ -16,11 +16,11 @@ An internal tool for a performance-marketing team: paste a public Google Drive l
 
 ## Flow
 
-1. The frontend sends `POST /api/analyze { url }` to the same Worker (same-origin, no CORS needed).
-2. The Worker parses the `fileId` out of the Drive link and downloads the raw bytes directly from Google Drive.
-3. Image → sent inline as base64 in a single `generateContent` call. Video → uploaded to the Gemini Files API (resumable upload), the Worker waits for `ACTIVE`, then references the file by `file_uri` in that same single call.
-4. One request returns both the person's attributes and the transcript together — enforced via `responseSchema` (an enum per field), not just described in the prompt text.
-5. The frontend renders a parameters table plus a transcript section, with distinct idle/loading/error/success states.
+1. The frontend accepts one or more Drive links (one per line) and, for each, opens `POST /api/analyze { url }` against the same Worker (same-origin, no CORS needed) as a **Server-Sent Events** stream.
+2. The Worker parses the `fileId` out of the Drive link, downloads the raw bytes directly from Google Drive, and emits a `downloading` progress event.
+3. Image → sent inline as base64 in a single `generateContent` call (emits `analyzing`). Video → uploaded to the Gemini Files API (resumable upload, emits `uploading`), the Worker waits for `ACTIVE` (emits `processing`), then references the file by `file_uri` in that same single `generateContent` call (emits `analyzing`).
+4. One request returns both the person's attributes and the transcript together — enforced via `responseSchema` (an enum per field), not just described in the prompt text. A final `done` event carries the result, or an `error` event carries a code + message.
+5. The frontend renders one card per link: a live Google Drive preview (embedded via Drive's own `/preview` endpoint, no bytes proxied through the Worker), a stage-aware progress indicator while it runs, then a parameters table plus transcript section on success — batching multiple links runs them with a client-side concurrency cap of 3 at a time.
 
 ## Architectural decisions
 
@@ -30,6 +30,9 @@ An internal tool for a performance-marketing team: paste a public Google Drive l
 - **`responseSchema` with enums**, not "return JSON" as prose in the prompt — this technically constrains the model to the values from the parameter table instead of just asking it to comply.
 - **An `AppError` hierarchy** (`src/errors.ts`) with distinct codes/HTTP statuses for invalid_url / drive_access_error / unsupported_file_type / gemini_error / gemini_safety_block — the frontend shows the user a readable message tied to the actual cause instead of a generic "something went wrong".
 - **`gemini-flash-latest` instead of a pinned model version.** During development it turned out the entire `gemini-2.5-*` line is already unavailable for new API keys ("no longer available to new users") — Google points to newer models instead. The alias automatically tracks whichever model is currently recommended, reducing the risk of sudden deprecation.
+- **Progress via hand-rolled SSE, not `EventSource`.** `EventSource` only supports `GET`, and this endpoint needs a `POST` body (the Drive URL), so the frontend uses `fetch` + a manual `ReadableStream` reader that parses the standard `data: {...}\n\n` framing itself (`frontend/src/lib/sse.ts`). The backend uses Hono's `streamSSE` helper (`src/index.ts`) so each pipeline stage (`downloading` / `uploading` / `processing` / `analyzing`) is pushed to the client as it happens instead of one opaque spinner.
+- **Batch mode reuses the single-URL endpoint N times, client-side**, rather than adding a batch endpoint. Each line the user pastes becomes its own SSE connection and its own card with independent state; a small concurrency cap (3 at a time) throttles how many run in parallel. This turned out not to be a hypothetical concern — Gemini's free-tier per-minute rate limit was hit repeatedly during this session's own testing, which is also why `fetchWithRetry` now backs off with 1s/2s exponential delays instead of a single flat retry.
+- **Media preview via Drive's own `/preview` iframe**, not by proxying the downloaded bytes back through the Worker. The file is already public, so the browser can embed `drive.google.com/file/d/{id}/preview` directly (verified it isn't blocked by `X-Frame-Options`/CSP) — this avoids doubling bandwidth and Worker time for something purely cosmetic.
 
 ## Edge case handling
 
@@ -44,7 +47,7 @@ An internal tool for a performance-marketing team: paste a public Google Drive l
 | Google Drive: large file / "can't scan for viruses" interstitial | Primary path is `drive.usercontent.google.com/download?...&confirm=t` (bypasses the warning for all 6 test files with no extra steps); a fallback parses a confirm token out of the HTML if the interstitial still appears |
 | Drive file not public / inaccessible | Detected via `Content-Type: text/html` instead of binary → a clear error is returned to the user |
 | Unsupported file type | `Content-Type` is checked before the file is ever sent to Gemini |
-| Gemini rate limit (429) / 503 | One retry with a short backoff |
+| Gemini rate limit (429) / 503 | Two retries with exponential backoff (1s, 2s) — added after this session's own testing hit the free-tier rate limit repeatedly |
 | Gemini safety block | Distinct error code `gemini_safety_block` (in practice, never triggered on any of the 6 test files — see below) |
 
 ## Results on the 6 provided test creatives
@@ -71,15 +74,20 @@ The entire codebase was written pair-programming with Claude Code (Sonnet 5). A 
 - **Debugging from evidence, not assumption.** When the Files API returned `200` with an empty `{}` instead of an upload URL, the first hypothesis was a Workers-specific header-stripping bug (a debug route was added to compare outgoing headers via httpbin). Only after that came up empty did rereading the code surface the real cause: a missing `/upload/` path segment, lost when the URL was copied from a shell test into TypeScript.
 - **The agent also drove infrastructure, not just code**: registering a workers.dev subdomain via the Cloudflare API (since `wrangler deploy` couldn't handle the corresponding interactive prompt non-interactively), setting secrets, and the full deploy.
 
+## Testing
+
+- `npm test` (root) — Vitest against `src/drive.ts` and `src/gemini.ts` in a plain Node environment, with `fetch` mocked using real `Response` objects. Covers Drive URL parsing, the confirm-token interstitial fallback, the image/video branching in `analyzeCreative`, the forced-null transcript on images, safety-block detection, and the 429 retry.
+- `npm --prefix frontend test` — Vitest + Testing Library + jsdom. `lib/sse.test.ts` exercises the hand-rolled SSE parser directly (including a chunk boundary landing mid-event); `CreativeCard.test.tsx` covers each render state from props; `App.test.tsx` mocks `streamAnalyze` to drive the full submit → progress → result flow, including batch mode and the client-side invalid-URL case.
+- **Scope note:** these are component/integration tests (jsdom, mocked network), not full browser end-to-end tests — Playwright wasn't set up given the time budget, and the Chrome extension used for live manual testing during this session was unavailable partway through. The current tests catch logic/rendering regressions but not real-browser issues (actual iframe embedding, real streaming timing, layout).
+
 ## What I'd do next (with ~5 more hours)
 
+- Real browser e2e (Playwright) against the deployed URL, including the Drive preview iframe actually rendering.
 - Cache analysis results by `fileId` (Workers KV) so re-analyzing the same creative isn't billed twice.
-- A media preview (image/video) next to the result — helps a marketer visually sanity-check that the AI didn't get it wrong.
-- Streaming progress (SSE/WebSocket) instead of one spinner — separately show "downloading file" vs "analyzing with Gemini", most noticeable on video (10-16s).
-- Unit tests for `drive.ts`/`gemini.ts` (URL parsing, schema edge cases) plus UI end-to-end tests.
+- Surface Gemini's 429 rate limit to the user as a visible "retrying in Ns…" countdown instead of a silent backoff — this repeatedly happened during this session's own testing and a silent retry under a generic spinner would be a confusing UX moment.
 - Rate limiting and lightweight auth — the tool is fully public right now, as the brief required, but a real internal tool should sit behind at least a basic password/token.
-- Batch mode: a list of links instead of one at a time — closer to how the team would actually use this daily.
 - Explicitly delete the file from the Gemini Files API right after analysis instead of relying on its automatic 48h expiry.
+- A cancel button per card (the `AbortController` plumbing is already there client-side, just not wired to a UI control).
 
 ## Local development
 

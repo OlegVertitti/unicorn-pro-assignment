@@ -60,3 +60,8 @@ export interface DownloadedFile {
   bytes: ArrayBuffer;
   mimeType: string;
 }
+
+export type AnalyzeSseEvent =
+  | { stage: "downloading" | "uploading" | "processing" | "analyzing" }
+  | { stage: "done"; result: AnalysisResult }
+  | { stage: "error"; error: { code: string; message: string } };

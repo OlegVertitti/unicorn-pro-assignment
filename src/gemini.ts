@@ -18,7 +18,7 @@ const MODEL = "gemini-flash-latest";
 const FILE_POLL_INTERVAL_MS = 1500;
 const FILE_POLL_MAX_ATTEMPTS = 30; // ~45s ceiling for Gemini to finish processing the upload
 
-const geminiResponseSchema = z.object({
+export const geminiResponseSchema = z.object({
   personDetected: z.boolean(),
   person: z
     .object({
@@ -39,11 +39,16 @@ function toBase64(bytes: ArrayBuffer): string {
   return Buffer.from(bytes).toString("base64");
 }
 
-async function fetchWithRetry(input: string, init: RequestInit, retries = 1): Promise<Response> {
+async function fetchWithRetry(
+  input: string,
+  init: RequestInit,
+  retries = 2,
+  attempt = 0,
+): Promise<Response> {
   const response = await fetch(input, init);
   if ((response.status === 429 || response.status === 503) && retries > 0) {
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    return fetchWithRetry(input, init, retries - 1);
+    await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+    return fetchWithRetry(input, init, retries - 1, attempt + 1);
   }
   return response;
 }
@@ -177,18 +182,28 @@ async function generateContent(mediaPart: GeminiPart, apiKey: string): Promise<R
   }
 }
 
-export async function analyzeCreative(file: DownloadedFile, apiKey: string): Promise<AnalysisResult> {
+export type AnalyzeStage = "uploading" | "processing" | "analyzing";
+export type ProgressCallback = (stage: AnalyzeStage) => void | Promise<void>;
+
+export async function analyzeCreative(
+  file: DownloadedFile,
+  apiKey: string,
+  onProgress?: ProgressCallback,
+): Promise<AnalysisResult> {
   const mediaType: "image" | "video" = file.mimeType.startsWith("video/") ? "video" : "image";
 
   let mediaPart: GeminiPart;
   if (mediaType === "image") {
     mediaPart = { inline_data: { mime_type: file.mimeType, data: toBase64(file.bytes) } };
   } else {
+    await onProgress?.("uploading");
     const fileUri = await uploadFile(file.bytes, file.mimeType, apiKey);
+    await onProgress?.("processing");
     await waitUntilActive(fileUri, apiKey);
     mediaPart = { file_data: { mime_type: file.mimeType, file_uri: fileUri } };
   }
 
+  await onProgress?.("analyzing");
   const raw = await generateContent(mediaPart, apiKey);
   const parsed = geminiResponseSchema.safeParse(raw);
   if (!parsed.success) {
