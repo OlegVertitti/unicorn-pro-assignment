@@ -27,12 +27,24 @@ export function CreativeCard({ job }: { job: Job }) {
     <div className="creative-card">
       <div className="preview">
         {fileId ? (
-          <iframe
-            src={`https://drive.google.com/file/d/${fileId}/preview`}
-            allow="autoplay"
-            loading="lazy"
-            title={`Preview of ${job.url}`}
-          />
+          <a
+            className="preview-media"
+            href={job.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={`Open ${job.url} in Google Drive`}
+          >
+            <img
+              src={`https://drive.google.com/thumbnail?id=${fileId}&sz=w1000`}
+              alt=""
+              loading="lazy"
+            />
+            {job.result?.mediaType === "video" && (
+              <span className="preview-play" aria-hidden="true">
+                ▶
+              </span>
+            )}
+          </a>
         ) : (
           <div className="preview-fallback">No preview</div>
         )}
