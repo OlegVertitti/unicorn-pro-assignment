@@ -17,7 +17,7 @@ app.post("/api/analyze", async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = analyzeRequestSchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: { code: "invalid_request", message: "Вкажіть поле url." } }, 400);
+    return c.json({ error: { code: "invalid_request", message: "The url field is required." } }, 400);
   }
 
   const file = await downloadDriveFile(parsed.data.url);
@@ -35,7 +35,7 @@ app.onError((err, c) => {
   }
   console.error("Unhandled error:", err);
   return c.json(
-    { error: { code: "internal_error", message: "Внутрішня помилка сервера." } },
+    { error: { code: "internal_error", message: "Internal server error." } },
     500,
   );
 });

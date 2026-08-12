@@ -70,11 +70,11 @@ async function uploadFile(
     body: JSON.stringify({ file: { displayName: "creative" } }),
   });
   if (!startResponse.ok) {
-    throw new GeminiError(`Не вдалося ініціалізувати завантаження у Gemini Files API (${startResponse.status}).`);
+    throw new GeminiError(`Failed to initialize upload to Gemini Files API (${startResponse.status}).`);
   }
   const uploadUrl = startResponse.headers.get("x-goog-upload-url");
   if (!uploadUrl) {
-    throw new GeminiError("Gemini Files API не повернув upload URL.");
+    throw new GeminiError("Gemini Files API did not return an upload URL.");
   }
 
   const uploadResponse = await fetch(uploadUrl, {
@@ -87,12 +87,12 @@ async function uploadFile(
     body: bytes,
   });
   if (!uploadResponse.ok) {
-    throw new GeminiError(`Не вдалося завантажити файл у Gemini (${uploadResponse.status}).`);
+    throw new GeminiError(`Failed to upload the file to Gemini (${uploadResponse.status}).`);
   }
   const uploadJson = (await uploadResponse.json()) as { file?: { uri?: string; state?: string } };
   const fileUri = uploadJson.file?.uri;
   if (!fileUri) {
-    throw new GeminiError("Gemini Files API не повернув URI файлу.");
+    throw new GeminiError("Gemini Files API did not return a file URI.");
   }
   return fileUri;
 }
@@ -101,16 +101,16 @@ async function waitUntilActive(fileUri: string, apiKey: string): Promise<void> {
   for (let attempt = 0; attempt < FILE_POLL_MAX_ATTEMPTS; attempt++) {
     const response = await fetch(`${fileUri}?key=${apiKey}`);
     if (!response.ok) {
-      throw new GeminiError(`Не вдалося перевірити статус обробки файлу у Gemini (${response.status}).`);
+      throw new GeminiError(`Failed to check file processing status on Gemini (${response.status}).`);
     }
     const json = (await response.json()) as { state?: string };
     if (json.state === "ACTIVE") return;
     if (json.state === "FAILED") {
-      throw new GeminiError("Gemini не зміг обробити завантажений файл.");
+      throw new GeminiError("Gemini failed to process the uploaded file.");
     }
     await new Promise((resolve) => setTimeout(resolve, FILE_POLL_INTERVAL_MS));
   }
-  throw new GeminiError("Перевищено час очікування обробки файлу у Gemini.");
+  throw new GeminiError("Timed out waiting for Gemini to finish processing the file.");
 }
 
 interface GeminiPart {
@@ -144,10 +144,10 @@ async function generateContent(mediaPart: GeminiPart, apiKey: string): Promise<R
 
   if (!response.ok) {
     if (response.status === 429) {
-      throw new GeminiError("Gemini API тимчасово перевантажений (rate limit). Спробуйте ще раз за хвилину.", 429);
+      throw new GeminiError("Gemini API is temporarily overloaded (rate limit). Please try again in a minute.", 429);
     }
     const errText = await response.text().catch(() => "");
-    throw new GeminiError(`Помилка Gemini API (${response.status}): ${errText.slice(0, 300)}`);
+    throw new GeminiError(`Gemini API error (${response.status}): ${errText.slice(0, 300)}`);
   }
 
   const json = (await response.json()) as {
@@ -167,13 +167,13 @@ async function generateContent(mediaPart: GeminiPart, apiKey: string): Promise<R
   }
   const text = candidate?.content?.parts?.find((p) => p.text)?.text;
   if (!text) {
-    throw new GeminiError("Gemini повернув порожню відповідь.");
+    throw new GeminiError("Gemini returned an empty response.");
   }
 
   try {
     return JSON.parse(text);
   } catch {
-    throw new GeminiError("Gemini повернув невалідний JSON.");
+    throw new GeminiError("Gemini returned invalid JSON.");
   }
 }
 
@@ -192,7 +192,7 @@ export async function analyzeCreative(file: DownloadedFile, apiKey: string): Pro
   const raw = await generateContent(mediaPart, apiKey);
   const parsed = geminiResponseSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new GeminiError("Відповідь Gemini не відповідає очікуваній структурі.");
+    throw new GeminiError("Gemini's response did not match the expected structure.");
   }
 
   const result = parsed.data;

@@ -4,13 +4,13 @@ import type { AnalysisResult, ApiErrorBody } from "./types";
 type Status = "idle" | "loading" | "error" | "success";
 
 const PARAM_LABELS: Record<keyof NonNullable<AnalysisResult["person"]>, string> = {
-  ethnicity: "Раса",
-  gender: "Стать",
-  age: "Вік",
-  activity: "Активність",
-  hairColor: "Колір волосся",
-  bodyType: "Тип тіла",
-  clothing: "Одяг",
+  ethnicity: "Ethnicity",
+  gender: "Gender",
+  age: "Age",
+  activity: "Activity",
+  hairColor: "Hair color",
+  bodyType: "Body type",
+  clothing: "Clothing",
 };
 
 function isValidDriveUrl(url: string): boolean {
@@ -47,7 +47,7 @@ export default function App() {
 
       if (!response.ok) {
         const body: ApiErrorBody | null = await response.json().catch(() => null);
-        setError(body?.error?.message ?? `Сталася помилка (${response.status}).`);
+        setError(body?.error?.message ?? `Something went wrong (${response.status}).`);
         setStatus("error");
         return;
       }
@@ -56,7 +56,7 @@ export default function App() {
       setResult(data);
       setStatus("success");
     } catch {
-      setError("Не вдалося з'єднатися із сервером. Перевірте інтернет-з'єднання і спробуйте ще раз.");
+      setError("Couldn't reach the server. Check your internet connection and try again.");
       setStatus("error");
     }
   }
@@ -64,10 +64,10 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        <h1>Аналізатор рекламних креативів</h1>
+        <h1>Ad Creative Analyzer</h1>
         <p className="subtitle">
-          Вставте публічне посилання на Google Drive — отримайте структурований аналіз людини в
-          кадрі та транскрипт мовлення.
+          Paste a public Google Drive link to get a structured analysis of the person in frame
+          and a transcript of any speech.
         </p>
       </header>
 
@@ -81,34 +81,34 @@ export default function App() {
           aria-label="Google Drive URL"
         />
         <button type="submit" disabled={!canSubmit}>
-          {status === "loading" ? "Аналізуємо…" : "Аналізувати"}
+          {status === "loading" ? "Analyzing…" : "Analyze"}
         </button>
       </form>
 
       {status === "idle" && (
-        <p className="hint">Приклад: https://drive.google.com/file/d/FILE_ID/view</p>
+        <p className="hint">Example: https://drive.google.com/file/d/FILE_ID/view</p>
       )}
 
       {status === "loading" && (
         <div className="state-box loading" role="status">
           <span className="spinner" aria-hidden="true" />
-          <span>Завантажуємо файл із Google Drive і надсилаємо в Gemini. Це може зайняти до хвилини для відео…</span>
+          <span>Downloading the file from Google Drive and sending it to Gemini. This can take up to a minute for video…</span>
         </div>
       )}
 
       {status === "error" && (
         <div className="state-box error" role="alert">
-          <strong>Не вдалося проаналізувати креатив.</strong>
+          <strong>Couldn't analyze this creative.</strong>
           <span>{error}</span>
         </div>
       )}
 
       {status === "success" && result && (
         <div className="result">
-          <div className="result-badge">{result.mediaType === "video" ? "Відео" : "Зображення"}</div>
+          <div className="result-badge">{result.mediaType === "video" ? "Video" : "Image"}</div>
 
           <section className="card">
-            <h2>Людина в кадрі</h2>
+            <h2>Person in frame</h2>
             {result.personDetected && result.person ? (
               <table className="params-table">
                 <tbody>
@@ -121,17 +121,17 @@ export default function App() {
                 </tbody>
               </table>
             ) : (
-              <p className="empty-note">Людину в фокусі не виявлено в цьому креативі.</p>
+              <p className="empty-note">No person in focus was detected in this creative.</p>
             )}
           </section>
 
           {result.mediaType === "video" && (
             <section className="card">
-              <h2>Транскрипт</h2>
+              <h2>Transcript</h2>
               {result.hasSpeech && result.transcript ? (
                 <p className="transcript">{result.transcript}</p>
               ) : (
-                <p className="empty-note">Мова у відео відсутня (тільки музика або тиша).</p>
+                <p className="empty-note">No speech in this video (music only or silence).</p>
               )}
             </section>
           )}

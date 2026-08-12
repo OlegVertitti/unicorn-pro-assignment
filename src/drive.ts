@@ -21,7 +21,7 @@ export function extractDriveFileId(url: string): string {
     const match = parsed.pathname.match(pattern) ?? url.match(pattern);
     if (match) return match[1];
   }
-  throw new InvalidUrlError("Не вдалося знайти ID файлу в цьому Google Drive посиланні.");
+  throw new InvalidUrlError("Couldn't find a file ID in this Google Drive link.");
 }
 
 const USER_AGENT =
@@ -83,7 +83,7 @@ export async function downloadDriveFile(url: string): Promise<DownloadedFile> {
 
   const bytes = await response.arrayBuffer();
   if (bytes.byteLength === 0) {
-    throw new DriveAccessError("Google Drive повернув порожній файл.");
+    throw new DriveAccessError("Google Drive returned an empty file.");
   }
 
   return { bytes, mimeType };

@@ -1,98 +1,97 @@
 # Ad Creative Analyzer
 
-Внутрішній інструмент для performance-маркетингової команди: вставляєш публічне посилання на Google Drive (картинка/відео), отримуєш структурований аналіз людини в кадрі та транскрипт мовлення — все через Gemini API.
+An internal tool for a performance-marketing team: paste a public Google Drive link (image or video), get a structured analysis of the person in frame and a transcript of any speech — all powered by the Gemini API.
 
 **Live URL:** https://unicorn-pro-assignment.olegvertitti.workers.dev
 
-## Стек
+## Stack
 
-| Компонент | Рішення |
+| Component | Choice |
 |---|---|
 | Backend | Cloudflare Worker (Hono) |
 | Frontend | React + Vite (TypeScript) |
-| Deploy | Один Cloudflare Worker з Static Assets (не окремі Workers + Pages) |
-| LLM | Gemini API, модель-alias `gemini-flash-latest` |
-| Валідація | Zod (і на вході, і на виході Gemini) |
+| Deploy | A single Cloudflare Worker with Static Assets (not separate Workers + Pages) |
+| LLM | Gemini API, model alias `gemini-flash-latest` |
+| Validation | Zod (both on the request and on Gemini's response) |
 
 ## Flow
 
-1. Фронтенд шле `POST /api/analyze { url }` на той самий Worker (same-origin, без CORS).
-2. Worker парсить `fileId` з Drive-посилання і качає байти напряму з Google Drive.
-3. Картинка → inline base64 в один `generateContent`-запит. Відео → завантажується у Gemini Files API (resumable upload), Worker чекає `ACTIVE`, потім референсить файл по `file_uri` в тому ж одному запиті.
-4. Один запит одночасно повертає і атрибути людини, і транскрипт — форсовано через `responseSchema` (enum-и на кожне поле), а не просто описом формату в тексті промпту.
-5. Фронтенд рендерить таблицю параметрів + секцію транскрипту, з окремими станами idle/loading/error/success.
+1. The frontend sends `POST /api/analyze { url }` to the same Worker (same-origin, no CORS needed).
+2. The Worker parses the `fileId` out of the Drive link and downloads the raw bytes directly from Google Drive.
+3. Image → sent inline as base64 in a single `generateContent` call. Video → uploaded to the Gemini Files API (resumable upload), the Worker waits for `ACTIVE`, then references the file by `file_uri` in that same single call.
+4. One request returns both the person's attributes and the transcript together — enforced via `responseSchema` (an enum per field), not just described in the prompt text.
+5. The frontend renders a parameters table plus a transcript section, with distinct idle/loading/error/success states.
 
-## Архітектурні рішення
+## Architectural decisions
 
-- **Один Worker (Static Assets), не Workers+Pages окремо.** Задача дозволяла обидва варіанти; єдиний деплой прибирає CORS і спрощує конфіг — свідомий trade-off на користь простоти за 5-6 год.
-- **Один Gemini-запит на файл**, не два (окремо vision + окремо transcript). Gemini вже обробляє кадри й аудіо відео разом за один виклик — другий запит подвоїв би вартість і латентність без користі.
-- **Files API для відео, inline base64 для картинок.** Картинки завжди малі — inline найпростіший шлях. Для відео Files API знімає неоднозначність з лімітами inline-payload (документація Google не консистентна: 20MB vs 100MB) і не рахується проти CPU-часу Worker'а (тільки I/O wait).
-- **`responseSchema` з enum-ами**, а не "поверни JSON" текстом у промпті — це технічно обмежує модель значеннями з таблиці параметрів, а не просто просить їх дотримуватись.
-- **Ієрархія `AppError`** (`src/errors.ts`) з окремими кодами/HTTP-статусами для invalid_url / drive_access_error / unsupported_file_type / gemini_error / gemini_safety_block — фронтенд показує користувачу читабельне повідомлення відповідно до причини, а не загальне "щось пішло не так".
-- **`gemini-flash-latest` замість конкретної версії моделі.** Під час розробки виявилось, що вся лінійка `gemini-2.5-*` вже недоступна для нових API-ключів ("no longer available to new users") — Google рекомендує нові моделі. Alias автоматично слідує за поточною рекомендованою моделлю, знижуючи ризик раптового deprecation.
+- **One Worker with Static Assets, not separate Workers + Pages.** The brief allowed either; a single deployment removes CORS and simplifies the config — a deliberate trade-off for simplicity within a 5-6 hour budget.
+- **One Gemini request per file**, not two (separate vision call + separate transcript call). Gemini already processes a video's frames and audio together in one call, so a second request would just double cost and latency for no benefit.
+- **Files API for video, inline base64 for images.** Images are always small, so inline is simplest. For video, the Files API removes ambiguity around inline payload limits (Google's own docs are inconsistent — 20MB vs 100MB) and doesn't count against the Worker's CPU time (only I/O wait).
+- **`responseSchema` with enums**, not "return JSON" as prose in the prompt — this technically constrains the model to the values from the parameter table instead of just asking it to comply.
+- **An `AppError` hierarchy** (`src/errors.ts`) with distinct codes/HTTP statuses for invalid_url / drive_access_error / unsupported_file_type / gemini_error / gemini_safety_block — the frontend shows the user a readable message tied to the actual cause instead of a generic "something went wrong".
+- **`gemini-flash-latest` instead of a pinned model version.** During development it turned out the entire `gemini-2.5-*` line is already unavailable for new API keys ("no longer available to new users") — Google points to newer models instead. The alias automatically tracks whichever model is currently recommended, reducing the risk of sudden deprecation.
 
-## Обробка edge cases
+## Edge case handling
 
-| Кейс | Поведінка |
+| Case | Behavior |
 |---|---|
-| Людини в фокусі немає | `personDetected: false`, `person: null`; транскрипт (закадровий голос) аналізується незалежно |
-| Відео без мови (музика/тиша) | `transcript: null`, `hasSpeech: false` |
-| Картинка | `transcript` і `hasSpeech` форсовано `null`/`false` в коді, навіть якби модель повернула щось інше |
-| Мова не англійська | Повертається оригіналом, без перекладу (прямо прописано в промпті) |
-| Раса неочевидна | Default `multiethnic` (в тому числі це єдина категорія для, напр., білошкірих — у наданій таблиці немає окремого "caucasian") |
-| **Двоє людей однаково у фокусі** (виявлено на тестовому фото — пара в обіймах, хоча ТЗ каже "завжди одна людина") | Промпт явно каже обрати того, хто ближче до камери/центру кадру; якщо нерозрізнимо — лівого |
-| Google Drive: великий файл / "can't scan for viruses" interstitial | Основний шлях — `drive.usercontent.google.com/download?...&confirm=t` (обходить попередження для всіх 6 тестових файлів без додаткових кроків); є fallback з парсингом confirm-токена з HTML, якщо interstitial все ж прийде |
-| Drive-файл не публічний / недоступний | Розпізнається по `Content-Type: text/html` замість бінарника → зрозуміла помилка користувачу |
-| Непідтримуваний тип файлу | Перевірка `Content-Type` перед відправкою в Gemini |
-| Gemini rate limit (429) / 503 | Один retry з невеликим бекофом |
-| Gemini safety-block | Окремий код помилки `gemini_safety_block` (на практиці не спрацював на жодному з 6 тестових файлів — див. нижче) |
+| No person in focus | `personDetected: false`, `person: null`; the transcript (voiceover) is still analyzed independently |
+| Video with no speech (music/silence) | `transcript: null`, `hasSpeech: false` |
+| Image | `transcript` and `hasSpeech` are forced to `null`/`false` in code, even if the model returned something else |
+| Non-English speech | Returned in the original language, no translation (explicit instruction in the prompt) |
+| Ambiguous ethnicity | Defaults to `multiethnic` (this is also the only bucket for, e.g., a white person — the given category list has no separate "caucasian" option) |
+| **Two people equally in focus** (found on a test image — a couple embracing, even though the brief says "always one person") | The prompt explicitly says to pick whoever is closer to camera/more centered; if truly indistinguishable, pick the one on the left |
+| Google Drive: large file / "can't scan for viruses" interstitial | Primary path is `drive.usercontent.google.com/download?...&confirm=t` (bypasses the warning for all 6 test files with no extra steps); a fallback parses a confirm token out of the HTML if the interstitial still appears |
+| Drive file not public / inaccessible | Detected via `Content-Type: text/html` instead of binary → a clear error is returned to the user |
+| Unsupported file type | `Content-Type` is checked before the file is ever sent to Gemini |
+| Gemini rate limit (429) / 503 | One retry with a short backoff |
+| Gemini safety block | Distinct error code `gemini_safety_block` (in practice, never triggered on any of the 6 test files — see below) |
 
-## Результати тестування 6 наданих креативів
+## Results on the 6 provided test creatives
 
-Усі 6 успішно оброблені end-to-end (Drive → Worker → Gemini → JSON), без жодної відмови safety-фільтрів навіть на прямому dating-контенті ("Lesbians over 50 need to know...", "After my divorce I was done with men...").
+All 6 were processed successfully end to end (Drive → Worker → Gemini → JSON), with no safety-filter refusals even on direct dating-vertical content ("Lesbians over 50 need to know about this...", "After my divorce I was done with men...").
 
-| # | Тип | Результат |
+| # | Type | Result |
 |---|---|---|
-| 1 | video, 7.4MB | ✅ жінка, selfie, транскрипт витягнуто |
-| 2 | image, 2.4MB | ✅ пара в обіймах — обрано чоловіка як primary (ближче/центральніше) |
-| 3 | video, 14MB | ✅ жінка, talking, транскрипт витягнуто |
-| 4 | video, 19.7MB | ✅ жінка, eating, транскрипт витягнуто |
-| 5 | video, 4.5MB | ✅ жінка, selfie, транскрипт витягнуто |
-| 6 | video, 3.3MB | ✅ жінка, dancing, короткий транскрипт |
+| 1 | video, 7.4MB | ✅ woman, selfie, transcript extracted |
+| 2 | image, 2.4MB | ✅ couple embracing — the man was picked as primary (closer/more centered) |
+| 3 | video, 14MB | ✅ woman, talking, transcript extracted |
+| 4 | video, 19.7MB | ✅ woman, eating, transcript extracted |
+| 5 | video, 4.5MB | ✅ woman, selfie, transcript extracted |
+| 6 | video, 3.3MB | ✅ woman, dancing, short transcript |
 
-Жодного провального файлу немає, тож окремо документувати нема чого.
+No file failed, so there's nothing to document as a known-broken case.
 
-## Як використовував(ла) AI-інструменти
+## How AI tools were used
 
-Весь код написаний у парі з Claude Code (Sonnet 5). Ключові моменти процесу, а не просто "AI писав код":
+The entire codebase was written pair-programming with Claude Code (Sonnet 5). A few things worth calling out beyond "an AI wrote the code":
 
-- **Спочатку емпірика, а не здогадки.** Перш ніж писати хоч рядок коду застосунку, прогнав усі 6 Drive-посилань і кілька prompt-варіантів напряму через `curl` (Gemini REST API + Drive download). Це одразу виявило, що специфіка задачі ("розмиті фонові персонажі", "raса/тіло/lingerie на реальних фото") — реальний ризик відмови safety-фільтрів, і що дефолтна модель з мого навчання (`gemini-2.5-flash`) вже заблокована для нових ключів. Обидва факти змінили архітектуру ще до першого рядка `gemini.ts`.
-- **Актуальні факти замість застарілих знань.** Знання моделі мають зріз на січень 2026, а йде серпень 2026 — за цей час з'явився `gemini-flash-latest`/Gemini 3.x, змінились Cloudflare Workers ліміти (subrequests, CPU-time) і рекомендований спосіб деплою фронтенду (Static Assets замість окремих Pages). Перед фіналізацією плану всі ці факти перевірені пошуком, а не взяті з пам'яті.
-- **Дебаг через дані, не припущення.** Коли Files API повертав 200 з порожнім `{}` замість upload URL, спершу було висунуто гіпотезу про Workers-специфічний баг із заголовками (додав debug-роут, що зіставляв заголовки через httpbin) — і тільки тоді, перечитавши код, знайшлася реальна причина: пропущений сегмент `/upload/` в URL, скопійованому з shell-тесту в TypeScript.
-- **AI-агент керував і інфраструктурою**, не тільки кодом: реєстрація workers.dev-субдомену через Cloudflare API (бо `wrangler deploy` в неінтерактивному режимі не міг обробити відповідний prompt), встановлення секретів, повний деплой.
+- **Empirical testing before writing app code.** Before a single line of application code was written, all 6 Drive links and several prompt variants were run directly through `curl` against the Gemini REST API and Drive's download endpoint. This immediately surfaced two facts that shaped the architecture: the brief's own fields (ethnicity/body type/lingerie on real photos, "ignore blurred background people") are a genuine safety-filter risk worth testing empirically rather than assuming, and the model I'd have defaulted to from training knowledge (`gemini-2.5-flash`) is already blocked for new API keys.
+- **Current facts instead of stale knowledge.** The model's knowledge cutoff is January 2026 and it is now August 2026 — in that gap, `gemini-flash-latest`/Gemini 3.x shipped, Cloudflare Workers limits changed (subrequests, CPU time), and the recommended way to deploy a frontend shifted (Static Assets over standalone Pages). All of these were verified via search before finalizing the plan, not recalled from memory.
+- **Debugging from evidence, not assumption.** When the Files API returned `200` with an empty `{}` instead of an upload URL, the first hypothesis was a Workers-specific header-stripping bug (a debug route was added to compare outgoing headers via httpbin). Only after that came up empty did rereading the code surface the real cause: a missing `/upload/` path segment, lost when the URL was copied from a shell test into TypeScript.
+- **The agent also drove infrastructure, not just code**: registering a workers.dev subdomain via the Cloudflare API (since `wrangler deploy` couldn't handle the corresponding interactive prompt non-interactively), setting secrets, and the full deploy.
 
-## Що зробив би далі (додаткові ~5 год)
+## What I'd do next (with ~5 more hours)
 
-- **Живе тестування UI в браузері** — розширення Chrome не підключилось у цій сесії; зараз фронтенд перевірений тільки через build + API contract, не через реальний клік користувача.
-- Кешування результату аналізу за `fileId` (Workers KV), щоб повторний аналіз того самого креативу не тарифікувався вдруге.
-- Прев'ю медіа (картинка/відео) поруч з результатом — допомагає маркетологу візуально звірити, що AI не помилився.
-- Стрімінг прогресу (SSE/WebSocket) замість одного спінера — окремо показувати "качаємо файл" / "аналізуємо у Gemini", особливо помітно для відео (10-16с).
-- Unit-тести на `drive.ts`/`gemini.ts` (парсинг URL, edge cases схеми) + e2e на UI.
-- Rate limiting і легка автентифікація — зараз інструмент повністю публічний, як і вимагалось умовою, але для реального внутрішнього використання варто закрити хоча б базовим паролем/токеном.
-- Батч-режим: список посилань замість одного за раз — реалістичніший сценарій для щоденної роботи команди.
-- Explicit-видалення файлу з Gemini Files API одразу після аналізу, а не покладання на автоматичне видалення через 48 год.
+- Cache analysis results by `fileId` (Workers KV) so re-analyzing the same creative isn't billed twice.
+- A media preview (image/video) next to the result — helps a marketer visually sanity-check that the AI didn't get it wrong.
+- Streaming progress (SSE/WebSocket) instead of one spinner — separately show "downloading file" vs "analyzing with Gemini", most noticeable on video (10-16s).
+- Unit tests for `drive.ts`/`gemini.ts` (URL parsing, schema edge cases) plus UI end-to-end tests.
+- Rate limiting and lightweight auth — the tool is fully public right now, as the brief required, but a real internal tool should sit behind at least a basic password/token.
+- Batch mode: a list of links instead of one at a time — closer to how the team would actually use this daily.
+- Explicitly delete the file from the Gemini Files API right after analysis instead of relying on its automatic 48h expiry.
 
-## Локальна розробка
+## Local development
 
 ```
 npm install
 npm --prefix frontend install
-cp .dev.vars.example .dev.vars   # додати свій GEMINI_API_KEY
-npm --prefix frontend run build  # Worker роздає зібраний dist через Static Assets
-npm run dev                      # wrangler dev на :8787
+cp .dev.vars.example .dev.vars   # add your own GEMINI_API_KEY
+npm --prefix frontend run build  # the Worker serves the built dist/ via Static Assets
+npm run dev                      # wrangler dev on :8787
 ```
 
-## Деплой
+## Deploy
 
 ```
 npx wrangler secret put GEMINI_API_KEY
